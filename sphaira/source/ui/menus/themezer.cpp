@@ -1,6 +1,4 @@
-#if 0
 #include "ui/menus/themezer.hpp"
-#include "ui/menus/ghdl.hpp"
 #include "ui/progress_box.hpp"
 #include "ui/option_box.hpp"
 #include "ui/sidebar.hpp"
@@ -15,8 +13,6 @@
 #include "i18n.hpp"
 #include "threaded_file_transfer.hpp"
 #include "image.hpp"
-#include "title_info.hpp"
-#include "nro.hpp"
 
 #include <minIni.h>
 #include <stb_image.h>
@@ -32,16 +28,9 @@ constexpr fs::FsPath THEME_FOLDER{"/themes/sphaira/"};
 constexpr auto CACHE_PATH = "/switch/sphaira/cache/themezer";
 constexpr auto URL_BASE = "https://switch.cdn.fortheusers.org";
 
-constexpr const char* NRO_URL = "https://github.com/exelix11/SwitchThemeInjector";
-
-constexpr const char* NRO_PATHS[]{
-    "/switch/NXThemesInstaller.nro",
-    "/switch/Switch_themes_Installer/NXThemesInstaller.nro",
-};
-
 constexpr const char* REQUEST_TARGET[]{
     "ResidentMenu",
-    "Entrance",
+    "Entrance", 
     "Flaunch",
     "Set",
     "Psl",
@@ -50,92 +39,95 @@ constexpr const char* REQUEST_TARGET[]{
 };
 
 constexpr const char* REQUEST_SORT[]{
-    "downloads",
-    "updated",
-    "likes",
-    "id"
+    "DOWNLOADS",
+    "UPDATED", 
+    "SAVES",
+    "CREATED"
 };
 
 constexpr const char* REQUEST_ORDER[]{
-    "desc",
-    "asc"
+    "DESC",
+    "ASC"
 };
 
-// https://api.themezer.net/?query=query($nsfw:Boolean,$target:String,$page:Int,$limit:Int,$sort:String,$order:String,$query:String,$creators:[String!]){themeList(nsfw:$nsfw,target:$target,page:$page,limit:$limit,sort:$sort,order:$order,query:$query,creators:$creators){id,creator{id,display_name},details{name,description},last_updated,dl_count,like_count,target,preview{original,thumb}}}&variables={"nsfw":false,"target":null,"page":1,"limit":10,"sort":"updated","order":"desc","query":null,"creators":["695065006068334622"]}
-// https://api.themezer.net/?query=query($nsfw:Boolean,$page:Int,$limit:Int,$sort:String,$order:String,$query:String,$creators:[String!]){packList(nsfw:$nsfw,page:$page,limit:$limit,sort:$sort,order:$order,query:$query,creators:$creators){id,creator{id,display_name},details{name,description},last_updated,dl_count,like_count,themes{id,creator{display_name},details{name,description},last_updated,dl_count,like_count,target,preview{original,thumb}}}}&variables={"nsfw":false,"page":1,"limit":10,"sort":"updated","order":"desc","query":null,"creators":["695065006068334622"]}
+// New GraphQL API endpoints:
+// Themes: https://api.themezer.net/graphql?query=query($target:Target,$page:PositiveInt,$limit:PositiveInt,$sort:ItemSort,$order:SortOrder,$query:String,$includeNSFW:Boolean){switchThemes(target:$target,page:$page,limit:$limit,sort:$sort,order:$order,query:$query,includeNSFW:$includeNSFW){nodes{hexId,creator{username},name,description,updatedAt,downloadCount,saveCount,target,previewJpgLargeUrl,previewJpgSmallUrl,downloadUrl}pageInfo{itemCount,limit,page,pageCount}}}
+// Packs: https://api.themezer.net/graphql?query=query($page:PositiveInt,$limit:PositiveInt,$sort:ItemSort,$order:SortOrder,$query:String,$includeNSFW:Boolean){switchPacks(page:$page,limit:$limit,sort:$sort,order:$order,query:$query,includeNSFW:$includeNSFW){nodes{hexId,creator{username},name,description,updatedAt,downloadCount,saveCount,previewJpgLargeUrl,previewJpgSmallUrl,themes{hexId,creator{username},name,description,updatedAt,downloadCount,saveCount,target,previewJpgLargeUrl,previewJpgSmallUrl,downloadUrl}}pageInfo{itemCount,limit,page,pageCount}}}
 
-auto GetNroPath() -> const char* {
-    fs::FsNativeSd fs;
-    for (auto& path : NRO_PATHS) {
-        if (fs.FileExists(path)) {
-            return path;
-        }
-    }
-
-    return nullptr;
-}
-
-auto HasNro() -> bool {
-    return GetNroPath() != nullptr;
-}
-
-// i know, this is cursed
-// todo: send actual POST request rather than GET.
+// Updated for new GraphQL API
 auto apiBuildUrlListInternal(const Config& e, bool is_pack) -> std::string {
-    std::string api = "https://api.themezer.net/?query=query";
-    // std::string fields = "{id,creator{id,display_name},details{name,description},last_updated,dl_count,like_count";
-    std::string fields = "{id,creator{id,display_name},details{name}";
-    const char* boolarr[2] = { "false", "true" };
-
-    std::string cmd;
-    std::string p0 = "$nsfw:Boolean,$page:Int,$limit:Int,$sort:String,$order:String";
-    std::string p1 = "nsfw:$nsfw,page:$page,limit:$limit,sort:$sort,order:$order";
-    std::string json = "\"nsfw\":"+std::string{boolarr[e.nsfw]}+",\"page\":"+std::to_string(e.page)+",\"limit\":"+std::to_string(e.limit)+",\"sort\":\""+std::string{REQUEST_SORT[e.sort_index]}+"\",\"order\":\""+std::string{REQUEST_ORDER[e.order_index]}+"\"";
-
+    std::string base_url = "https://api.themezer.net/graphql";
+    std::string query;
+    std::string variables;
+    
     if (is_pack) {
-        cmd = "packList";
-        // fields += ",themes{id,creator{display_name},details{name,description},last_updated,dl_count,like_count,target,preview{original,thumb}}";
-        fields += ",themes{id,preview{thumb}}";
-    } else {
-        cmd = "themeList";
-        p0 += ",$target:String";
-        p1 += ",target:$target";
-        if (e.target_index < 7) {
-            json += ",\"target\":\"" + std::string{REQUEST_TARGET[e.target_index]} + "\"";
+        // GraphQL query for packs with NSFW support
+        query = "query%28%24page%3APositiveInt%2C%24limit%3APositiveInt%2C%24sort%3AItemSort%2C%24order%3ASortOrder%2C%24query%3AString%2C%24includeNSFW%3ABoolean%29%7BswitchPacks%28page%3A%24page%2Climit%3A%24limit%2Csort%3A%24sort%2Corder%3A%24order%2Cquery%3A%24query%2CincludeNSFW%3A%24includeNSFW%29%7Bnodes%7BhexId%2Ccreator%7Busername%7D%2Cname%2Cdescription%2CupdatedAt%2CdownloadCount%2CsaveCount%2CpreviewJpgLargeUrl%2CpreviewJpgSmallUrl%2Cthemes%7BhexId%2Ccreator%7Busername%7D%2Cname%2Cdescription%2CupdatedAt%2CdownloadCount%2CsaveCount%2Ctarget%2CpreviewJpgLargeUrl%2CpreviewJpgSmallUrl%2CdownloadUrl%7D%7DpageInfo%7BitemCount%2Climit%2Cpage%2CpageCount%7D%7D%7D";
+        
+        // Build variables JSON for packs
+        variables = "{\"page\":" + std::to_string(e.page) + ",\"limit\":" + std::to_string(e.limit) + ",\"sort\":\"" + std::string{REQUEST_SORT[e.sort_index]} + "\",\"order\":\"" + std::string{REQUEST_ORDER[e.order_index]} + "\"";
+        
+        if (!e.query.empty()) {
+            variables += ",\"query\":\"" + e.query + "\"";
         } else {
-            json += ",\"target\":null";
+            variables += ",\"query\":null";
         }
+        
+        // Add includeNSFW parameter
+        variables += ",\"includeNSFW\":" + std::string(e.nsfw ? "true" : "false");
+        variables += "}";
+    } else {
+        // GraphQL query for themes with NSFW support
+        query = "query%28%24target%3ATarget%2C%24page%3APositiveInt%2C%24limit%3APositiveInt%2C%24sort%3AItemSort%2C%24order%3ASortOrder%2C%24query%3AString%2C%24includeNSFW%3ABoolean%29%7BswitchThemes%28target%3A%24target%2Cpage%3A%24page%2Climit%3A%24limit%2Csort%3A%24sort%2Corder%3A%24order%2Cquery%3A%24query%2CincludeNSFW%3A%24includeNSFW%29%7Bnodes%7BhexId%2Ccreator%7Busername%7D%2Cname%2Cdescription%2CupdatedAt%2CdownloadCount%2CsaveCount%2Ctarget%2CpreviewJpgLargeUrl%2CpreviewJpgSmallUrl%2CdownloadUrl%7DpageInfo%7BitemCount%2Climit%2Cpage%2CpageCount%7D%7D%7D";
+        
+        // Build variables JSON for themes
+        variables = "{\"page\":" + std::to_string(e.page) + ",\"limit\":" + std::to_string(e.limit) + ",\"sort\":\"" + std::string{REQUEST_SORT[e.sort_index]} + "\",\"order\":\"" + std::string{REQUEST_ORDER[e.order_index]} + "\"";
+        
+        if (e.target_index < 7) {
+            variables += ",\"target\":\"" + std::string{REQUEST_TARGET[e.target_index]} + "\"";
+        } else {
+            variables += ",\"target\":null";
+        }
+        
+        if (!e.query.empty()) {
+            variables += ",\"query\":\"" + e.query + "\"";
+        } else {
+            variables += ",\"query\":null";
+        }
+        
+        // Add includeNSFW parameter
+        variables += ",\"includeNSFW\":" + std::string(e.nsfw ? "true" : "false");
+        variables += "}";
     }
-
-    if (!e.creator.empty()) {
-        p0 += ",$creators:[String!]";
-        p1 += ",creators:$creators";
-        json += ",\"creators\":[\"" + e.creator + "\"]";
-    }
-
-    if (!e.query.empty()) {
-        p0 += ",$query:String";
-        p1 += ",query:$query";
-        json += ",\"query\":\"" + e.query + "\"";
-    }
-
-    json = curl::EscapeString('{'+json+'}');
-
-    return api+"("+p0+"){"+cmd+"("+p1+")"+fields+"}}&variables="+json;
+    
+    // URL encode the variables
+    variables = curl::EscapeString(variables);
+    
+    return base_url + "?query=" + query + "&variables=" + variables;
 }
 
 auto apiBuildUrlDownloadInternal(const std::string& id, bool is_pack) -> std::string {
-    char url[2048];
-    std::snprintf(url, sizeof(url), "https://api.themezer.net/?query=query{download%s(id:\"%s\"){filename,url,mimetype}}", is_pack ? "Pack" : "Theme", id.c_str());
-    return url;
-    // https://api.themezer.net/?query=query{downloadPack(id:"11"){filename,url,mimetype}}
+    std::string base_url = "https://api.themezer.net/graphql";
+    std::string query;
+    std::string variables;
+    
+    if (is_pack) {
+        query = "query%28%24hexId%3AString%21%29%7BswitchPack%28hexId%3A%24hexId%29%7BdownloadUrl%7D%7D";
+        variables = "{\"hexId\":\"" + id + "\"}";
+    } else {
+        query = "query%28%24hexId%3AString%21%29%7BswitchTheme%28hexId%3A%24hexId%29%7BdownloadUrl%7D%7D";
+        variables = "{\"hexId\":\"" + id + "\"}";
+    }
+    
+    variables = curl::EscapeString(variables);
+    return base_url + "?query=" + query + "&variables=" + variables;
 }
 
 auto apiBuildUrlDownloadPack(const PackListEntry& e) -> std::string {
     return apiBuildUrlDownloadInternal(e.id, true);
 }
 
-auto apiBuildUrlListPacks(const Config& e) -> std::string {
+[[maybe_unused]] auto apiBuildUrlListPacks(const Config& e) -> std::string {
     return apiBuildUrlListInternal(e, true);
 }
 
@@ -185,6 +177,17 @@ void from_json(yyjson_val* json, Creator& e) {
         JSON_SET_STR(id);
         JSON_SET_STR(display_name);
     );
+    
+    // 如果没有display_name但有username，使用username作为display_name
+    if (e.display_name.empty()) {
+        auto username_obj = yyjson_obj_get(json, "username");
+        if (username_obj) {
+            auto username = yyjson_get_str(username_obj);
+            if (username) {
+                e.display_name = username;
+            }
+        }
+    }
 }
 
 void from_json(yyjson_val* json, Details& e) {
@@ -193,51 +196,296 @@ void from_json(yyjson_val* json, Details& e) {
     );
 }
 
-void from_json(yyjson_val* json, Preview& e) {
-    JSON_OBJ_ITR(
-        JSON_SET_STR(thumb);
-    );
+[[maybe_unused]] void from_json(yyjson_val* json, Preview& e) {
+    // 解析预览图URL - 使用previewJpgSmallUrl
+    auto previewSmall_obj = yyjson_obj_get(json, "previewJpgSmallUrl");
+    if (previewSmall_obj) {
+        auto previewSmall = yyjson_get_str(previewSmall_obj);
+        if (previewSmall) {
+            e.thumb = previewSmall;
+            log_write("[Preview] Using previewJpgSmallUrl: %s\n", previewSmall);
+        }
+    }
+    
+    // 如果previewJpgSmallUrl为空，尝试使用thumb字段（兼容性处理）
+    if (e.thumb.empty()) {
+        JSON_OBJ_ITR(
+            JSON_SET_STR(thumb);
+        );
+        
+        if (!e.thumb.empty()) {
+            log_write("[Preview] Using legacy thumb field: %s\n", e.thumb.c_str());
+        }
+    }
+    
+    // 如果所有URL字段都为空，记录警告
+    if (e.thumb.empty()) {
+        log_write("[Preview] Warning: No preview URL found (previewJpgSmallUrl and thumb are all empty or missing)\n");
+    }
 }
 
 void from_json(yyjson_val* json, ThemeEntry& e) {
     JSON_OBJ_ITR(
         JSON_SET_STR(id);
-        JSON_SET_OBJ(preview);
     );
+    
+    // 如果没有id但有hexId，使用hexId作为id
+    if (e.id.empty()) {
+        auto hexId_obj = yyjson_obj_get(json, "hexId");
+        if (hexId_obj) {
+            auto hexId = yyjson_get_str(hexId_obj);
+            if (hexId) {
+                e.id = hexId;
+                log_write("[ThemeEntry] Using hexId as id: %s\n", hexId);
+            }
+        }
+    }
+    
+    // 解析预览图URL - 使用previewJpgSmallUrl
+    auto previewSmall_obj = yyjson_obj_get(json, "previewJpgSmallUrl");
+    if (previewSmall_obj) {
+        auto previewSmall = yyjson_get_str(previewSmall_obj);
+        if (previewSmall) {
+            e.preview.thumb = previewSmall;
+            log_write("[ThemeEntry] Using previewJpgSmallUrl: %s for theme: %s\n", previewSmall, e.id.c_str());
+        }
+    }
+    
+    // 如果previewJpgSmallUrl为空，尝试使用thumb字段（兼容性处理）
+    if (e.preview.thumb.empty()) {
+        auto thumb_obj = yyjson_obj_get(json, "thumb");
+        if (thumb_obj) {
+            auto thumb = yyjson_get_str(thumb_obj);
+            if (thumb) {
+                e.preview.thumb = thumb;
+                log_write("[ThemeEntry] Using legacy thumb field: %s for theme: %s\n", thumb, e.id.c_str());
+            }
+        }
+    }
+    
+    // 如果所有URL字段都为空，记录警告
+    if (e.preview.thumb.empty()) {
+        log_write("[ThemeEntry] Warning: No preview URL found (previewJpgSmallUrl and thumb are all empty or missing) for theme: %s\n", e.id.c_str());
+    }
 }
 
-void from_json(yyjson_val* json, PackListEntry& e) {
+void from_json_node(yyjson_val* json, PackListEntry& e) {
+    // 处理GraphQL响应中的节点格式
     JSON_OBJ_ITR(
         JSON_SET_STR(id);
+    );
+    
+    // 如果没有id但有hexId，使用hexId作为id
+    if (e.id.empty()) {
+        auto hexId_obj = yyjson_obj_get(json, "hexId");
+        if (hexId_obj) {
+            auto hexId = yyjson_get_str(hexId_obj);
+            if (hexId) {
+                e.id = hexId;
+                log_write("[DEBUG] from_json_node:使用hexId作为id: %s\n", hexId);
+            }
+        }
+    }
+    
+    // 处理creator对象
+    auto creator_obj = yyjson_obj_get(json, "creator");
+    if (creator_obj) {
+        from_json(creator_obj, e.creator);
+    }
+    
+    // 处理themes数组并提取下载URL和预览图
+    auto themes_obj = yyjson_obj_get(json, "themes");
+    if (themes_obj && yyjson_is_arr(themes_obj)) {
+        size_t idx, max;
+        yyjson_val* theme_node;
+        yyjson_arr_foreach(themes_obj, idx, max, theme_node) {
+            ThemeEntry theme;
+            
+            // 解析theme的hexId
+            auto theme_hexId_obj = yyjson_obj_get(theme_node, "hexId");
+            if (theme_hexId_obj) {
+                auto theme_hexId = yyjson_get_str(theme_hexId_obj);
+                if (theme_hexId) {
+                    theme.id = theme_hexId;
+                }
+            }
+            
+            // 解析预览图URL - 使用previewJpgSmallUrl
+            auto previewSmall_obj = yyjson_obj_get(theme_node, "previewJpgSmallUrl");
+            if (previewSmall_obj) {
+                auto previewSmall = yyjson_get_str(previewSmall_obj);
+                if (previewSmall) {
+                    theme.preview.thumb = previewSmall;
+                    log_write("[DEBUG] from_json_node:主题预览图URL: %s\n", previewSmall);
+                }
+            }
+            
+            // 解析下载URL
+            auto downloadUrl_obj = yyjson_obj_get(theme_node, "downloadUrl");
+            if (downloadUrl_obj) {
+                auto downloadUrl = yyjson_get_str(downloadUrl_obj);
+                if (downloadUrl) {
+                    // 从第一个主题中提取下载URL（Pack的下载URL通常在第一个主题中）
+                    if (idx == 0 && e.downloadUrl.empty()) {
+                        e.downloadUrl = downloadUrl;
+                        log_write("[DEBUG] from_json_node:提取到下载URL: %s\n", downloadUrl);
+                    }
+                }
+            }
+            
+            e.themes.push_back(theme);
+        }
+    }
+    
+    // 如果themes数组中没有找到下载URL，尝试从pack级别获取
+    if (e.downloadUrl.empty()) {
+        auto downloadUrl_obj = yyjson_obj_get(json, "downloadUrl");
+        if (downloadUrl_obj) {
+            auto downloadUrl = yyjson_get_str(downloadUrl_obj);
+            if (downloadUrl) {
+                e.downloadUrl = downloadUrl;
+                log_write("[DEBUG] from_json_node:从pack级别提取到下载URL: %s\n", downloadUrl);
+            }
+        }
+    }
+    
+    // 如果没有details.name但有name字段，使用name字段
+    if (e.details.name.empty()) {
+        auto name_obj = yyjson_obj_get(json, "name");
+        if (name_obj) {
+            auto name = yyjson_get_str(name_obj);
+            if (name) {
+                e.details.name = name;
+            }
+        }
+    }
+}
+
+[[maybe_unused]] void from_json(yyjson_val* json, PackListEntry& e) {
+    JSON_OBJ_ITR(
+        JSON_SET_STR(hexId);
+        JSON_SET_STR(name);
+        JSON_SET_STR(description);
+        JSON_SET_STR(username);
+        JSON_SET_STR(previewJpgSmallUrl);
+        JSON_SET_STR(previewJpgLargeUrl);
         JSON_SET_OBJ(creator);
         JSON_SET_OBJ(details);
         JSON_SET_ARR_OBJ(themes);
     );
+    
+    // 将hexId赋值给id字段，用于下载URL构建
+    if (!e.hexId.empty()) {
+        e.id = e.hexId;
+        log_write("[PackListEntry] Using hexId as id: %s\n", e.hexId.c_str());
+    }
 }
 
 void from_json(yyjson_val* json, Pagination& e) {
     JSON_OBJ_ITR(
         JSON_SET_UINT(page);
         JSON_SET_UINT(limit);
-        JSON_SET_UINT(page_count);
-        JSON_SET_UINT(item_count);
+        JSON_SET_UINT(pageCount);
+        JSON_SET_UINT(itemCount);
     );
 }
 
 void from_json(const std::vector<u8>& data, DownloadPack& e) {
+    // 添加调试：打印原始响应数据
+    std::string response_str(data.begin(), data.end());
+    log_write("[DEBUG] GraphQL Response: %s\n", response_str.c_str());
+    
     JSON_INIT_VEC(data, "data");
-    JSON_GET_OBJ("downloadPack");
+    
+    // 检查是否存在switchPack对象
+    auto switchPack = yyjson_obj_get(json, "switchPack");
+    if (!switchPack) {
+        log_write("[ERROR] switchPack not found in response\n");
+        return; // 改为直接返回，不抛出异常
+    }
+    
+    json = switchPack;
     JSON_OBJ_ITR(
-        JSON_SET_STR(filename);
-        JSON_SET_STR(url);
-        JSON_SET_STR(mimetype);
+        JSON_SET_STR(downloadUrl);
     );
+    
+    log_write("[DEBUG] Extracted downloadUrl: %s\n", e.downloadUrl.c_str());
+    
+    // 检查downloadUrl是否为空
+    if (e.downloadUrl.empty()) {
+        log_write("[ERROR] downloadUrl is empty\n");
+        return; // 改为直接返回，不抛出异常
+    }
+    
+    // 将downloadUrl赋值给url字段，因为InstallTheme函数使用的是url字段
+    e.url = e.downloadUrl;
+    log_write("[DEBUG] Set url field: %s\n", e.url.c_str());
+    
+    // Set default values for filename and mimetype since new API doesn't provide them
+    e.filename = "theme_pack.zip";
+    e.mimetype = "application/zip";
 }
 
 void from_json(const fs::FsPath& path, PackList& e) {
     JSON_INIT_VEC_FILE(path, "data", nullptr);
+    
+    // 保存原始json指针
+    yyjson_val* original_json = json;
+    
+    // 处理新的GraphQL响应格式
+    auto switchPacks = yyjson_obj_get(json, "switchPacks");
+    if (switchPacks) {
+        json = switchPacks; // 使用switchPacks对象作为新的解析起点
+    }
+    
+    // 处理pageInfo
+    auto pageInfo = yyjson_obj_get(json, "pageInfo");
+    if (pageInfo) {
+        // 解析pageInfo到pagination
+        auto page_obj = yyjson_obj_get(pageInfo, "page");
+        auto limit_obj = yyjson_obj_get(pageInfo, "limit");
+        auto itemCount_obj = yyjson_obj_get(pageInfo, "itemCount");
+        auto pageCount_obj = yyjson_obj_get(pageInfo, "pageCount");
+        
+        if (page_obj) {
+            auto page = yyjson_get_num(page_obj);
+            if (page > 0) e.pagination.page = static_cast<u64>(page);
+        }
+        if (limit_obj) {
+            auto limit = yyjson_get_num(limit_obj);
+            if (limit > 0) e.pagination.limit = static_cast<u64>(limit);
+        }
+        if (itemCount_obj) {
+            auto itemCount = yyjson_get_num(itemCount_obj);
+            if (itemCount > 0) e.pagination.item_count = static_cast<u64>(itemCount);
+        }
+        if (pageCount_obj) {
+            auto pageCount = yyjson_get_num(pageCount_obj);
+            if (pageCount > 0) e.pagination.page_count = static_cast<u64>(pageCount);
+        }
+    }
+    
+    // 处理nodes数组包装
+    auto nodes = yyjson_obj_get(json, "nodes");
+    if (nodes) {
+        json = nodes; // 使用nodes数组作为新的解析起点
+        
+        // 解析nodes数组中的packList条目
+        if (yyjson_is_arr(json)) {
+            size_t idx, max;
+            yyjson_val* node;
+            yyjson_arr_foreach(json, idx, max, node) {
+                PackListEntry entry;
+                from_json_node(node, entry);
+                e.packs.push_back(entry);
+            }
+        }
+    }
+    
+    // 恢复原始json指针以解析pagination
+    json = original_json;
+    
     JSON_OBJ_ITR(
-        JSON_SET_ARR_OBJ(packList);
         JSON_SET_OBJ(pagination);
     );
 }
@@ -286,65 +534,14 @@ auto InstallTheme(ProgressBox* pbox, const PackListEntry& entry) -> Result {
 
     ON_SCOPE_EXIT(fs.DeleteFile(zip_out));
 
-    // replace invalid characters in the name.
-    fs::FsPath name_buf{entry.details.name};
-    title::utilsReplaceIllegalCharacters(name_buf, false);
-
-    // replace invalid characters in the author.
-    fs::FsPath author_buf{entry.creator.display_name};
-    title::utilsReplaceIllegalCharacters(author_buf, false);
-
-    // create directories.
+    // create directories
     fs::FsPath dir_path;
-    std::snprintf(dir_path, sizeof(dir_path), "%s/%s - By %s", THEME_FOLDER.s, name_buf.s, author_buf.s);
+    std::snprintf(dir_path, sizeof(dir_path), "%s/%s - By %s", THEME_FOLDER.s, entry.details.name.c_str(), entry.creator.display_name.c_str());
     fs.CreateDirectoryRecursively(dir_path);
 
     // 3. extract the zip
-    std::vector<std::string> nxtheme_paths;
     if (!pbox->ShouldExit()) {
-        R_TRY(thread::TransferUnzipAll(pbox, zip_out, &fs, dir_path, [&nxtheme_paths](const fs::FsPath& name, fs::FsPath& path){
-            // just in case theme packs start adding invalid entries.
-            if (!path.ends_with(".nxtheme")) {
-                return false;
-            }
-
-            // store path for later.
-            nxtheme_paths.emplace_back(path);
-            return true;
-        }));
-    }
-
-    // ensure that we actually downloaded the theme.
-    // todo: add new error for this.
-    R_UNLESS(!nxtheme_paths.empty(), Result_ThemezerFailedToDownloadTheme);
-
-    // if we have nxtheme installed, prompt the user to install the theme now.
-    if (HasNro()) {
-        App::Push<OptionBox>(
-            "Theme downloaded, install now?"_i18n,
-            "Back"_i18n, "Install"_i18n, 1, [nxtheme_paths](auto op_index){
-                if (op_index && *op_index) {
-                    std::string args;
-
-                    for (const auto& paths : nxtheme_paths) {
-                        // add space between each arg.
-                        if (!args.empty()) {
-                            args += ' ';
-                        }
-
-                        // converts path to sdmc:/path.
-                        args += nro_add_arg_file(paths);
-                    }
-
-                    log_write("themezer nro: %s\n", GetNroPath());
-                    log_write("themezer args: %s\n", args.c_str());
-
-                    // launch nro with args to the nxthemes.
-                    const auto rc = nro_launch(GetNroPath(), args);
-                    App::PushErrorBox(rc, "Failed to launch NXthemes_Installer.nro"_i18n);
-                }
-            }
-        );
+        R_TRY(thread::TransferUnzipAll(pbox, zip_out, &fs, dir_path));
     }
 
     log_write("finished install :)\n");
@@ -383,22 +580,79 @@ Menu::Menu(u32 flags) : MenuBase{"Themezer"_i18n, flags} {
                             const auto& entry = page.m_packList[m_index];
                             const auto url = apiBuildUrlDownloadPack(entry);
 
-                            App::Push<ProgressBox>(entry.themes[0].preview.lazy_image.image, "Downloading "_i18n, entry.details.name, [this, &entry](auto pbox) -> Result {
-                                return InstallTheme(pbox, entry);
-                            }, [this, &entry](Result rc){
-                                App::PushErrorBox(rc, "Failed to download theme"_i18n);
+                            App::Push<ProgressBox>(
+                                entry.themes[0].preview.lazy_image.image,
+                                "Downloading "_i18n,
+                                entry.details.name,
+                                [this, &entry](auto pbox) -> Result {
+                                    return InstallTheme(pbox, entry);
+                                }, [this, &entry](Result rc){
+                                    App::PushErrorBox(rc, "Failed to download theme"_i18n);
 
-                                if (R_SUCCEEDED(rc)) {
-                                    App::Notify("Downloaded "_i18n + entry.details.name);
+                                    if (R_SUCCEEDED(rc)) {
+                                        App::Notify("Downloaded "_i18n + entry.details.name);
+                                    }
                                 }
-                            });
+                            );
                         }
                     }
                 }
             );
         }}),
         std::make_pair(Button::X, Action{"Options"_i18n, [this](){
-            DisplayOptions();
+            auto options = std::make_unique<Sidebar>("Themezer Options"_i18n, Sidebar::Side::RIGHT);
+            ON_SCOPE_EXIT(App::Push(std::move(options)));
+
+            SidebarEntryArray::Items sort_items;
+            sort_items.push_back("Downloads"_i18n);
+            sort_items.push_back("Updated"_i18n);
+            sort_items.push_back("Likes"_i18n);
+            sort_items.push_back("ID"_i18n);
+
+            SidebarEntryArray::Items order_items;
+            order_items.push_back("Descending (down)"_i18n);
+            order_items.push_back("Ascending (Up)"_i18n);
+
+            options->Add<SidebarEntryBool>("Nsfw"_i18n, m_nsfw.Get(), [this](bool& v_out){
+                m_nsfw.Set(v_out);
+                InvalidateAllPages();
+            });
+
+            options->Add<SidebarEntryArray>("Sort"_i18n, sort_items, [this, sort_items](s64& index_out){
+                if (m_sort.Get() != index_out) {
+                    m_sort.Set(index_out);
+                    InvalidateAllPages();
+                }
+            }, m_sort.Get());
+
+            options->Add<SidebarEntryArray>("Order"_i18n, order_items, [this, order_items](s64& index_out){
+                if (m_order.Get() != index_out) {
+                    m_order.Set(index_out);
+                    InvalidateAllPages();
+                }
+            }, m_order.Get());
+
+            options->Add<SidebarEntryCallback>("Page"_i18n, [this](){
+                s64 out;
+                if (R_SUCCEEDED(swkbd::ShowNumPad(out, "Enter Page Number"_i18n.c_str(), nullptr, nullptr, -1, 3))) {
+                    if (out < m_page_index_max) {
+                        m_page_index = out;
+                        PackListDownload();
+                    } else {
+                        log_write("invalid page number\n");
+                        App::Notify("Bad Page"_i18n);
+                    }
+                }
+            });
+
+            options->Add<SidebarEntryCallback>("Search"_i18n, [this](){
+                std::string out;
+                if (R_SUCCEEDED(swkbd::ShowText(out)) && !out.empty()) {
+                    m_search = out;
+                    // PackListDownload();
+                    InvalidateAllPages();
+                }
+            });
         }}),
         std::make_pair(Button::R2, Action{"Next"_i18n, [this](){
             m_page_index++;
@@ -565,28 +819,6 @@ void Menu::Draw(NVGcontext* vg, Theme* theme) {
 
 void Menu::OnFocusGained() {
     MenuBase::OnFocusGained();
-
-    if (!m_checked_for_nro) {
-        m_checked_for_nro = true;
-
-        // check if we have the nro, if not, then prompt the user to download from the appstore.
-        if (!HasNro()) {
-            App::Push<OptionBox>(
-                "NXthemes_Installer.nro not found, download now?"_i18n,
-                "Back"_i18n, "Download"_i18n, 1, [this](auto op_index){
-                    if (op_index && *op_index) {
-                        const gh::AssetEntry asset{
-                            .name = "NXThemesInstaller.nro",
-                            // same path as appstore
-                            .path = "/switch/Switch_themes_Installer/NXThemesInstaller.nro",
-                        };
-
-                        gh::Download(NRO_URL, asset, "latest");
-                    }
-                }
-            );
-        }
-    }
 }
 
 void Menu::InvalidateAllPages() {
@@ -617,13 +849,18 @@ void Menu::PackListDownload() {
     config.sort_index = m_sort.Get();
     config.order_index = m_order.Get();
     config.nsfw = m_nsfw.Get();
-    const auto packList_url = apiBuildUrlListPacks(config);
+    
+    // 使用正确的函数签名构建URL
+    const auto packList_url = apiBuildUrlListInternal(config, true);
     const auto packlist_path = apiBuildListPacksCache(config);
 
-    log_write("\npackList_url: %s\n\n", packList_url.c_str());
+    // 添加调试信息
+    log_write("\n[DEBUG] packList_url: %s\n", packList_url.c_str());
+    log_write("[DEBUG] search query: %s\n", m_search.c_str());
 
     curl::Api().ToFileAsync(
         curl::Url{packList_url},
+        curl::Header{{"User-Agent", "themezer-nx"}},
         curl::Path{packlist_path},
         curl::Flags{curl::Flag_Cache},
         curl::StopToken{this->GetToken()},
@@ -645,7 +882,7 @@ void Menu::PackListDownload() {
             m_pages.resize(a.pagination.page_count);
             auto& page = m_pages[page_index-1];
 
-            page.m_packList = a.packList;
+            page.m_packList = a.packs;
             page.m_pagination = a.pagination;
             page.m_ready = PageLoadState::Done;
             m_page_index_max = a.pagination.page_count;
@@ -660,68 +897,4 @@ void Menu::PackListDownload() {
     });
 }
 
-void Menu::DisplayOptions() {
-    auto options = std::make_unique<Sidebar>("Themezer Options"_i18n, Sidebar::Side::RIGHT);
-    ON_SCOPE_EXIT(App::Push(std::move(options)));
-
-    SidebarEntryArray::Items sort_items;
-    sort_items.push_back("Downloads"_i18n);
-    sort_items.push_back("Updated"_i18n);
-    sort_items.push_back("Likes"_i18n);
-    sort_items.push_back("ID"_i18n);
-
-    SidebarEntryArray::Items order_items;
-    order_items.push_back("Descending (down)"_i18n);
-    order_items.push_back("Ascending (Up)"_i18n);
-
-    options->Add<SidebarEntryBool>("Nsfw"_i18n, m_nsfw.Get(), [this](bool& v_out){
-        m_nsfw.Set(v_out);
-        InvalidateAllPages();
-    });
-
-    options->Add<SidebarEntryArray>("Sort"_i18n, sort_items, [this, sort_items](s64& index_out){
-        if (m_sort.Get() != index_out) {
-            m_sort.Set(index_out);
-            InvalidateAllPages();
-        }
-    }, m_sort.Get());
-
-    options->Add<SidebarEntryArray>("Order"_i18n, order_items, [this, order_items](s64& index_out){
-        if (m_order.Get() != index_out) {
-            m_order.Set(index_out);
-            InvalidateAllPages();
-        }
-    }, m_order.Get());
-
-    options->Add<SidebarEntryCallback>("Page"_i18n, [this](){
-        s64 out;
-        if (R_SUCCEEDED(swkbd::ShowNumPad(out, "Enter Page Number"_i18n.c_str(), nullptr, -1, 3))) {
-            if (out < m_page_index_max) {
-                m_page_index = out;
-                PackListDownload();
-            } else {
-                log_write("invalid page number\n");
-                App::Notify("Bad Page"_i18n);
-            }
-        }
-    });
-
-    options->Add<SidebarEntryCallback>("Search"_i18n, [this](){
-        std::string out;
-        if (R_SUCCEEDED(swkbd::ShowText(out)) && !out.empty()) {
-            m_search = out;
-            // PackListDownload();
-            InvalidateAllPages();
-        }
-    });
-
-    if (HasNro()) {
-        options->Add<SidebarEntryCallback>("Launch NXthemes_Installer.nro"_i18n, [](){
-            const auto rc = nro_launch(GetNroPath());
-            App::PushErrorBox(rc, "Failed to launch NXthemes_Installer.nro"_i18n);
-        });
-    }
-}
-
 } // namespace sphaira::ui::menu::themezer
-#endif

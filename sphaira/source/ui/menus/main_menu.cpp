@@ -71,12 +71,10 @@ const MiscMenuEntry MISC_MENU_ENTRIES[] = {
         "You can backup and restore saves.\n\n"
         "Experimental support for backing up system saves is possible." },
 
-#if 0
     { .name = "Themezer", .title = "Themezer", .func = MiscMenuFuncGenerator<ui::menu::themezer::Menu>, .flag = MiscMenuFlag_Shortcut, .info =
         "Download themes from themezer.net. "
         "Themes are downloaded to /themes/sphaira\n"
         "To install the themes, NXThemesInstaller needs to be installed (can be downloaded via the AppStore)." },
-#endif
 
     { .name = "GitHub", .title = "GitHub", .func = MiscMenuFuncGenerator<ui::menu::gh::Menu>, .flag = MiscMenuFlag_Shortcut, .info =
         "Download releases directly from GitHub. "

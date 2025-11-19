@@ -1971,7 +1971,7 @@ void App::DisplayThemeOptions(bool left_side) {
 
     // todo: add file picker for music here.
     // todo: add array to audio which has the list of supported extensions.
-    auto remove_music = options->Add<ui::SidebarEntryCallback>("Remove Background Music", [](){
+    auto remove_music = options->Add<ui::SidebarEntryCallback>("Remove Background Music"_i18n, [](){
         g_app->m_default_music.Set("");
         audio::CloseSong(&g_app->m_background_music);
     },  "Removes the background music file"_i18n);

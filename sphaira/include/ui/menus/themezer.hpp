@@ -1,4 +1,3 @@
-#if 0
 #pragma once
 
 #include "ui/menus/menu_base.hpp"
@@ -46,11 +45,13 @@ enum class PageLoadState {
 
 struct Creator {
     std::string id{};
+    std::string username{};
     std::string display_name{};
 };
 
 struct Details {
     std::string name{};
+    std::string description{};
 };
 
 struct Preview {
@@ -62,19 +63,33 @@ struct DownloadPack {
     std::string filename{};
     std::string url{};
     std::string mimetype{};
+    std::string downloadUrl{};
 };
 
 using DownloadTheme = DownloadPack;
 
 struct ThemeEntry {
     std::string id{};
+    std::string hexId{};
+    std::string name{};
+    std::string target{};
+    std::string creator{};
+    std::string username{};
+    std::string previewJpgSmallUrl{};
     Preview preview{};
 };
 
 struct PackListEntry {
     std::string id{};
+    std::string hexId{};
+    std::string name{};
+    std::string description{};
+    std::string username{};
     Creator creator{};
     Details details{};
+    std::string previewJpgSmallUrl{};
+    std::string previewJpgLargeUrl{};
+    std::string downloadUrl{};
     std::vector<ThemeEntry> themes{};
 };
 
@@ -83,11 +98,15 @@ struct Pagination {
     u64 limit{};
     u64 page_count{};
     u64 item_count{};
+    u64 pageCount{};
+    u64 itemCount{};
 };
 
 struct PackList {
-    std::vector<PackListEntry> packList{};
+    std::vector<PackListEntry> packs{};
+    std::vector<PackListEntry> nodes{};
     Pagination pagination{};
+    Pagination pageInfo{};
 };
 
 struct Config {
@@ -105,7 +124,7 @@ struct Config {
     u32 limit{18};
     bool nsfw{false};
 
-    void SetQuery(const std::string& new_query) {
+    void SetQuery(std::string new_query) {
         query = new_query;
     }
 
@@ -113,7 +132,7 @@ struct Config {
         query.clear();
     }
 
-    void SetCreator(const Creator& new_creator) {
+    void SetCreator(Creator new_creator) {
         creator = new_creator.id;
     }
 
@@ -139,7 +158,6 @@ struct Menu final : MenuBase {
     void Draw(NVGcontext* vg, Theme* theme) override;
     void OnFocusGained() override;
 
-private:
     void SetIndex(s64 index) {
         m_index = index;
         if (!m_index) {
@@ -149,7 +167,7 @@ private:
 
     void InvalidateAllPages();
     void PackListDownload();
-    void DisplayOptions();
+    void OnPackListDownload();
 
 private:
     static constexpr inline const char* INI_SECTION = "themezer";
@@ -171,9 +189,6 @@ private:
     option::OptionLong m_sort{INI_SECTION, "sort", 0};
     option::OptionLong m_order{INI_SECTION, "order", 0};
     option::OptionBool m_nsfw{INI_SECTION, "nsfw", false};
-
-    bool m_checked_for_nro{};
 };
 
 } // namespace sphaira::ui::menu::themezer
-#endif
